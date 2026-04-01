@@ -1,6 +1,6 @@
 [
   {
-    "name": "getserva – test db",
+    "name": "postgres",
     "supabase_url": "https://tqujdvlmgrpjgpbvxjgm.supabase.co",
     "supabase_key_env": "SUPABASE_KEY_1",
     "table_name": "keep-alive"
