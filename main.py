@@ -6,22 +6,25 @@ import logging
 from helpers.utils import generate_secure_random_string
 from services.supabase_service import SupabaseClient
 
-# User-defined variables to toggle additional features
-log_failed_databases = True  # Set to True to log failed databases
-detailed_status_report = True  # Set to True to generate a detailed status report
+log_failed_databases = True
+detailed_status_report = True
 
-# Configure logging with timestamp
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
+def mask_key(key):
+    if not key:
+        return "None"
+    return f"{key[:6]}...{key[-4:]}" if len(key) > 10 else "***"
+
 def main():
-    # Load configurations from config.json
     try:
         with open('config.json', 'r') as config_file:
             configs = json.load(config_file)
+        logging.info(f"Loaded {len(configs)} database configs")
     except FileNotFoundError:
         logging.error("Configuration file 'config.json' not found.")
         return
@@ -29,26 +32,27 @@ def main():
         logging.error(f"Error parsing 'config.json': {e}")
         return
 
-    all_successful = True  # Flag to track overall success
-
-    # Initialize lists for additional features
+    all_successful = True
     failed_databases = [] if log_failed_databases else None
     status_report = [] if detailed_status_report else None
 
-    # Iterate over each configuration
     for config in configs:
         name = config.get('name', 'Unnamed Database')
         url = config.get('supabase_url')
         key = config.get('supabase_key')
         table_name = config.get('table_name', 'KeepAlive')
-
-        # If using environment variables for keys
         key_env_var = config.get('supabase_key_env')
+
         if key_env_var:
             key = os.getenv(key_env_var)
+            logging.info(f"[{name}] Using env var: {key_env_var} → exists={bool(key)}")
+
+        logging.info(f"[{name}] URL: {url}")
+        logging.info(f"[{name}] KEY present: {bool(key)} | len={len(key) if key else 0} | preview={mask_key(key)}")
+        logging.info(f"[{name}] TABLE: {table_name}")
 
         if not url or not key:
-            logging.error(f"Supabase URL or Key missing for '{name}'. Skipping.")
+            logging.error(f"[{name}] Missing URL or KEY. Skipping.")
             all_successful = False
             if log_failed_databases:
                 failed_databases.append(name)
@@ -56,57 +60,58 @@ def main():
 
         logging.info(f"Processing database: {name}")
 
-        # Initialize Supabase client for this configuration
         supabase_client = SupabaseClient(url, key, table_name)
 
-        # Generate a random string
         random_name = generate_secure_random_string(10)
+        logging.info(f"[{name}] Generated value: {random_name}")
 
-        # Insert the random name into the table
+        logging.info(f"[{name}] Attempting INSERT into '{table_name}' with payload: {{'name': '{random_name}'}}")
         success_insert = supabase_client.insert_random_name(random_name)
+
         if not success_insert:
+            logging.error(f"[{name}] INSERT failed")
             all_successful = False
             if log_failed_databases:
                 failed_databases.append(name)
-            # Proceed to next database since insertion failed
             continue
 
-        # Get the count of entries in the table
+        logging.info(f"[{name}] INSERT success")
+
+        logging.info(f"[{name}] Fetching row count...")
         count = supabase_client.get_table_count()
+
         if count is None:
-            logging.error(f"Failed to get count for table '{table_name}' in database '{name}'.")
+            logging.error(f"[{name}] COUNT failed for table '{table_name}'")
             all_successful = False
             if log_failed_databases:
                 failed_databases.append(name)
-            continue  # Skip to next configuration
+            continue
 
-        logging.info(f"Current number of entries in '{table_name}': {count}")
+        logging.info(f"[{name}] Row count: {count}")
 
-        # Initialize success_delete to None
         success_delete = None
 
-        # If there are more than 10 entries, delete a random one
         if count > 10:
-            logging.info(f"Table '{table_name}' has more than 10 entries. Deleting a random entry.")
+            logging.info(f"[{name}] Count > 10 → deleting random row")
             success_delete = supabase_client.delete_random_entry()
             if not success_delete:
+                logging.error(f"[{name}] DELETE failed")
                 all_successful = False
                 if log_failed_databases and name not in failed_databases:
                     failed_databases.append(name)
+            else:
+                logging.info(f"[{name}] DELETE success")
         else:
-            logging.info(f"Table '{table_name}' has 10 or fewer entries. No deletion needed.")
+            logging.info(f"[{name}] Count ≤ 10 → no deletion")
 
-        # Collect status information
         if detailed_status_report:
-            status = {
+            status_report.append({
                 'name': name,
                 'success_insert': success_insert,
                 'success_delete': success_delete,
                 'count': count
-            }
-            status_report.append(status)
+            })
 
-    # After processing all configurations
     if all_successful:
         logging.info("All database actions were successful.")
     else:
@@ -123,10 +128,7 @@ def main():
             logging.info(f"Database: {status['name']}")
             logging.info(f"  Insert Success: {status['success_insert']}")
             logging.info(f"  Entry Count: {status['count']}")
-            if status['success_delete'] is not None:
-                logging.info(f"  Delete Success: {status['success_delete']}")
-            else:
-                logging.info("  Delete Success: N/A")
+            logging.info(f"  Delete Success: {status['success_delete'] if status['success_delete'] is not None else 'N/A'}")
 
 
 if __name__ == "__main__":
